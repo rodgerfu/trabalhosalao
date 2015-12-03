@@ -1,0 +1,277 @@
+{-# LANGUAGE OverloadedStrings, TypeFamilies, QuasiQuotes,
+             TemplateHaskell, GADTs, FlexibleContexts,
+             MultiParamTypeClasses, DeriveDataTypeable,
+             GeneralizedNewtypeDeriving, ViewPatterns #-}
+module Main where
+import Database.Persist.Postgresql
+import Control.Monad.Logger (runStdoutLoggingT)
+import Data.Text (Text)
+import Data.Time
+import qualified Data.Text as T
+import Control.Applicative
+import Yesod
+--import qualified Database.Esqueleto as E
+--import Database.Esqueleto ((^.))
+data Pagina = Pagina{connPool :: ConnectionPool}
+
+instance Yesod Pagina
+
+share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
+Cliente
+   nome Text
+   telefone Text
+   deriving Show
+
+Servico
+   nome Text sqltype=varchar(20)
+   descricao Text
+   estoque Int
+
+Agenda
+   cliId ClienteId
+   servicoId ServicoId
+   qtde Int
+   data UTCTime default=now()
+   processado Bool
+   UniqueCliServico cliId servicoId
+|]
+
+mkYesod "Pagina" [parseRoutes|
+  /servico ServicoR GET POST
+  /cliente CliR GET POST
+  /listservico ListarServicoR GET
+  /listcli ListarCliR GET
+  /agenda AgendaR GET POST
+  / ListarAgendaR GET
+|]
+
+instance YesodPersist Pagina where
+   type YesodPersistBackend Pagina = SqlBackend
+   runDB f = do
+       master <- getYesod
+       let pool = connPool master
+       runSqlPool f pool
+
+type Form a = Html -> MForm Handler (FormResult a, Widget)
+
+instance RenderMessage Pagina FormMessage where
+    renderMessage _ _ = defaultFormMessage
+
+formAgenda :: Form Agenda
+formAgenda = renderDivs $ Agenda <$>
+             areq (selectField clis) "Servico " Nothing <*>
+             areq (selectField servicos) "Cli " Nothing <*>
+             areq intField "Qtde" Nothing <*>
+             lift (liftIO getCurrentTime) <*>
+             lift (liftIO $ return False)
+
+servicos = do
+       entidades <- runDB $ selectList [] [Asc ServicoNome] 
+       optionsPairs $ fmap (\ent -> (servicoNome $ entityVal ent, entityKey ent)) entidades
+
+clis = do
+       entidades <- runDB $ selectList [] [Asc ClienteNome] 
+       optionsPairs $ fmap (\ent -> (clienteNome $ entityVal ent, entityKey ent)) entidades
+
+formServico :: Form Servico
+formServico = renderDivs $ Servico <$>
+             areq textField "Nome " Nothing <*>
+             areq textField "Descricao " Nothing <*>
+             areq intField "Qtde Estoque " Nothing
+
+formCli :: Form Cliente
+formCli = renderDivs $ Cliente <$>
+             areq textField "Nome " Nothing <*>
+             areq textField "Telefone " Nothing
+
+widgetForm :: Route Pagina -> Enctype -> Widget -> Text -> Widget
+widgetForm x enctype widget y = [whamlet|
+         <body>
+            <h1>
+                Cadastro de #{y}
+            <form method=post action=@{x} enctype=#{enctype}>
+                ^{widget}
+                <input type="submit" value="Cadastrar">
+       [cassius|
+        body
+            color:#BA55D3
+            padding: 5px,5px,10px,10px
+            text-align:center
+        h1
+            color:#8B008B
+            font-family:cursive
+            text-align:center
+            font-size:22px
+
+       form
+            color:#4B0082
+            font-family:Courier, "Lucida Console", monospace
+            text-align:center
+            font-size:14px
+|]
+
+getServicoR :: Handler Html
+getServicoR = do
+           (widget, enctype) <- generateFormPost formServico
+           defaultLayout $ widgetForm ServicoR enctype widget "Servicos"
+
+postServicoR :: Handler Html
+postServicoR = do
+            ((result,_),_) <- runFormPost formServico
+            case result of
+                FormSuccess servico -> (runDB $ insert servico) >> defaultLayout [whamlet|
+                <body>
+                <h1> Servico inserido!
+                [|cassius
+                     h1
+                         color:#8B008B
+                         font-family:cursive
+                         text-align:center
+                         font-size:22px
+                    body
+                        color:#BA55D3
+                        padding: 5px,5px,10px,10px
+                        text-align:center
+                    |]
+                _ -> redirect ServicoR
+
+
+getCliR :: Handler Html
+getCliR = do
+           (widget, enctype) <- generateFormPost formCli
+           defaultLayout $ widgetForm CliR enctype widget "Clientes"
+
+postCliR :: Handler Html
+postCliR = do
+            ((result,_),_) <- runFormPost formCli
+            case result of
+                FormSuccess cli -> (runDB $ insert cli) >> defaultLayout [whamlet|
+                <body>
+                <h1> Cliente inserido! [|cassius
+                     h1
+                         color:#8B008B
+                         font-family:cursive
+                         text-align:center
+                         font-size:22px
+                    body
+                        color:#BA55D3
+                        padding: 5px,5px,10px,10px
+                        text-align:center
+                    |]
+                _ -> redirect CliR
+
+getListarServicoR :: Handler Html
+getListarServicoR = do
+                 servicos <- runDB $ selectList [] [Asc ServicoNome]
+                 defaultLayout [whamlet|
+                      <body>
+                      <h1> Lista de Servicos
+                      $forall Entity pid pent <- servicos
+                          <h2> #{servicoNome pent}
+                    [|cassius
+                    body
+                        color:#BA55D3
+                        padding: 5px,5px,10px,10px
+                        text-align:center
+                    }
+                     h1
+                         color:#8B008B
+                         font-family:cursive
+                         text-align:center
+                         font-size:22px
+                    h2
+                         color:#4B0082
+                         font-family:Courier, "Lucida Console", monospace
+                         text-align:center
+                         font-size:14px
+                 |]
+
+getListarCliR :: Handler Html
+getListarCliR = do
+                 clis <- runDB $ selectList [] [Asc ClienteNome]
+                 defaultLayout [whamlet|
+                     <body>
+                      <h1> Lista de Clientes
+                      $forall Entity fid fent <- clis
+                          <h2> #{clienteNome fent}
+                     [|cassius
+                     body {
+                        color:#BA55D3
+                        padding: 5px,5px,10px,10px
+                        text-align:center
+                    }
+                     h1
+                         color:#8B008B
+                         font-family:cursive
+                         text-align:center
+                         font-size:22px
+                    h2
+                         color:#4B0082
+                         font-family:Courier, "Lucida Console", monospace
+                         text-align:center
+                         font-size:14px
+
+                 |]
+
+getAgendaR :: Handler Html
+getAgendaR = do
+           (widget, enctype) <- generateFormPost formAgenda
+           defaultLayout $ widgetForm AgendaR enctype widget "Agenda"
+
+postAgendaR :: Handler Html
+postAgendaR = do
+            ((result,_),_) <- runFormPost formAgenda
+            case result of
+                FormSuccess x -> (runDB $ insert x) >> defaultLayout [whamlet|
+                <body>
+                <h1> Agenda atualizada!
+                     [|cassius
+                     body
+                        color:#BA55D3
+                        padding: 5px,5px,10px,10px
+                        text-align:center
+
+                     h1
+                         color:#8B008B
+                         font-family:cursive
+                         text-align:center
+                         font-size:22px
+                    |]
+                _ -> redirect AgendaR
+
+getListarAgendaR :: Handler Html
+getListarAgendaR = do
+                 agenda <- runDB $ (rawSql "SELECT ??, ?? \
+                                   \FROM agenda INNER JOIN servico \
+                                   \ON agenda.cliente_id=servico.id" [])::Handler [(Entity Agenda, Entity Servico)]
+                 defaultLayout [whamlet|
+                     <body>
+                      <h1> Agenda
+                      $forall (Entity oq agenda, Entity _ np) <- agenda
+                          <p> Agenda do dia #{show $ utctDay $ agendaData agenda} #{fromSqlKey oq}: #{servicoNome np}
+
+                       [|cassius
+                         body
+                            color:#BA55D3
+                            padding: 5px,5px,10px,10px
+                            text-align:center
+
+                        h1
+                            color:#8B008B
+                            font-family:cursive
+                            text-align:center
+                            font-size:22px
+                        p
+                            color:#4B0082
+                            font-family:Courier, "Lucida Console", monospace
+                            text-align:center
+                            font-size:14px
+                            margin-left:20px
+                 |]
+
+connStr = "dbname=d9e4mjne7009hm host=ec2-107-21-219-235.compute-1.amazonaws.com user=jlknkxlyvwtxco password=ExaaN46QZvM7ihCCszk1rk8rBE port=5432"
+
+main::IO()
+main = runStdoutLoggingT $ withPostgresqlPool connStr 10 $ \pool -> liftIO $ do
+       runSqlPersistMPool (runMigration migrateAll) pool
+       warpEnv (Pagina pool)
