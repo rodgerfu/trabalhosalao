@@ -7,6 +7,7 @@ import Database.Persist.Postgresql
 import Control.Monad.Logger (runStdoutLoggingT)
 import Data.Text (Text)
 import Data.Time
+import Text.Cassius
 import qualified Data.Text as T
 import Control.Applicative
 import Yesod
@@ -30,7 +31,7 @@ Servico
 Agenda
    cliId ClienteId
    servicoId ServicoId
-   qtde Int
+   preco Int
    data UTCTime default=now()
    processado Bool
    UniqueCliServico cliId servicoId
@@ -42,7 +43,8 @@ mkYesod "Pagina" [parseRoutes|
   /listservico ListarServicoR GET
   /listcli ListarCliR GET
   /agenda AgendaR GET POST
-  / ListarAgendaR GET
+  /listAgenda ListarAgendaR GET
+
 |]
 
 instance YesodPersist Pagina where
@@ -59,9 +61,9 @@ instance RenderMessage Pagina FormMessage where
 
 formAgenda :: Form Agenda
 formAgenda = renderDivs $ Agenda <$>
-             areq (selectField clis) "Servico " Nothing <*>
-             areq (selectField servicos) "Cli " Nothing <*>
-             areq intField "Qtde" Nothing <*>
+             areq (selectField clis) "Cliente  " Nothing <*>
+             areq (selectField servicos) "Servico " Nothing <*>
+             areq intField "Preco " Nothing <*>
              lift (liftIO getCurrentTime) <*>
              lift (liftIO $ return False)
 
@@ -86,30 +88,38 @@ formCli = renderDivs $ Cliente <$>
 
 widgetForm :: Route Pagina -> Enctype -> Widget -> Text -> Widget
 widgetForm x enctype widget y = [whamlet|
-         <body>
-            <h1>
-                Cadastro de #{y}
-            <form method=post action=@{x} enctype=#{enctype}>
-                ^{widget}
-                <input type="submit" value="Cadastrar">
-       [cassius|
-        body
-            color:#BA55D3
-            padding: 5px,5px,10px,10px
-            text-align:center
-        h1
-            color:#8B008B
-            font-family:cursive
-            text-align:center
-            font-size:22px
+            <body>
+                <h1>
+                    Cadastro de #{y}
+                <form method=post action=@{x} enctype=#{enctype}>
+                    ^{widget}
+                    <input type="submit" value="Cadastrar">
+        |] >>
+        toWidget [cassius|
+            body
+                color:#BA55D3
+                padding: 5px,5px,10px,10px
+                text-align:center
+            h1
+                color:#8B008B
+                font-family:cursive
+                text-align:center
+                font-size:22px
+            form
+                color:#4B0082
+                font-family:Courier, "Lucida Console", monospace
+                text-align:center
+                font-size:14px
+            p
+                color:#4B0082
+                font-family:Courier, "Lucida Console", monospace
+                text-align:center
+                font-size:14px
+                margin-left:20px
+        |]
 
-       form
-            color:#4B0082
-            font-family:Courier, "Lucida Console", monospace
-            text-align:center
-            font-size:14px
-|]
 
+ 
 getServicoR :: Handler Html
 getServicoR = do
            (widget, enctype) <- generateFormPost formServico
@@ -121,18 +131,9 @@ postServicoR = do
             case result of
                 FormSuccess servico -> (runDB $ insert servico) >> defaultLayout [whamlet|
                 <body>
-                <h1> Servico inserido!
-                [|cassius
-                     h1
-                         color:#8B008B
-                         font-family:cursive
-                         text-align:center
-                         font-size:22px
-                    body
-                        color:#BA55D3
-                        padding: 5px,5px,10px,10px
-                        text-align:center
-                    |]
+                     <h1> Servico inserido!
+
+              |]
                 _ -> redirect ServicoR
 
 
@@ -147,16 +148,7 @@ postCliR = do
             case result of
                 FormSuccess cli -> (runDB $ insert cli) >> defaultLayout [whamlet|
                 <body>
-                <h1> Cliente inserido! [|cassius
-                     h1
-                         color:#8B008B
-                         font-family:cursive
-                         text-align:center
-                         font-size:22px
-                    body
-                        color:#BA55D3
-                        padding: 5px,5px,10px,10px
-                        text-align:center
+                <h1> Cliente inserido! 
                     |]
                 _ -> redirect CliR
 
@@ -168,23 +160,7 @@ getListarServicoR = do
                       <h1> Lista de Servicos
                       $forall Entity pid pent <- servicos
                           <h2> #{servicoNome pent}
-                    [|cassius
-                    body
-                        color:#BA55D3
-                        padding: 5px,5px,10px,10px
-                        text-align:center
-                    }
-                     h1
-                         color:#8B008B
-                         font-family:cursive
-                         text-align:center
-                         font-size:22px
-                    h2
-                         color:#4B0082
-                         font-family:Courier, "Lucida Console", monospace
-                         text-align:center
-                         font-size:14px
-                 |]
+                                   |]
 
 getListarCliR :: Handler Html
 getListarCliR = do
@@ -194,24 +170,8 @@ getListarCliR = do
                       <h1> Lista de Clientes
                       $forall Entity fid fent <- clis
                           <h2> #{clienteNome fent}
-                     [|cassius
-                     body {
-                        color:#BA55D3
-                        padding: 5px,5px,10px,10px
-                        text-align:center
-                    }
-                     h1
-                         color:#8B008B
-                         font-family:cursive
-                         text-align:center
-                         font-size:22px
-                    h2
-                         color:#4B0082
-                         font-family:Courier, "Lucida Console", monospace
-                         text-align:center
-                         font-size:14px
+                                      |]
 
-                 |]
 
 getAgendaR :: Handler Html
 getAgendaR = do
@@ -225,18 +185,7 @@ postAgendaR = do
                 FormSuccess x -> (runDB $ insert x) >> defaultLayout [whamlet|
                 <body>
                 <h1> Agenda atualizada!
-                     [|cassius
-                     body
-                        color:#BA55D3
-                        padding: 5px,5px,10px,10px
-                        text-align:center
-
-                     h1
-                         color:#8B008B
-                         font-family:cursive
-                         text-align:center
-                         font-size:22px
-                    |]
+                                         |]
                 _ -> redirect AgendaR
 
 getListarAgendaR :: Handler Html
@@ -250,26 +199,9 @@ getListarAgendaR = do
                       $forall (Entity oq agenda, Entity _ np) <- agenda
                           <p> Agenda do dia #{show $ utctDay $ agendaData agenda} #{fromSqlKey oq}: #{servicoNome np}
 
-                       [|cassius
-                         body
-                            color:#BA55D3
-                            padding: 5px,5px,10px,10px
-                            text-align:center
-
-                        h1
-                            color:#8B008B
-                            font-family:cursive
-                            text-align:center
-                            font-size:22px
-                        p
-                            color:#4B0082
-                            font-family:Courier, "Lucida Console", monospace
-                            text-align:center
-                            font-size:14px
-                            margin-left:20px
                  |]
 
-connStr = "dbname=d9e4mjne7009hm host=ec2-107-21-219-235.compute-1.amazonaws.com user=jlknkxlyvwtxco password=ExaaN46QZvM7ihCCszk1rk8rBE port=5432"
+connStr = "dbname=db2ccv1a8rmfe6 host=ec2-54-197-247-170.compute-1.amazonaws.com user=gllhgnpbqumxmv password=xutwjC7lNzqxSaLoCnuVIIN285 port=5432"
 
 main::IO()
 main = runStdoutLoggingT $ withPostgresqlPool connStr 10 $ \pool -> liftIO $ do
